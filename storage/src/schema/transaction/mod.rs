@@ -1,22 +1,28 @@
 // Copyright (c) The Starcoin Core Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::storage::{CodecKVStore, CodecWriteBatch, ValueCodec};
-use crate::TRANSACTION_PREFIX_NAME;
-use crate::{define_storage, TransactionStore};
 use anyhow::Result;
 use bcs_ext::BCSCodec;
 use starcoin_crypto::HashValue;
-use starcoin_types::transaction::Transaction;
+use starcoin_schemadb::{
+    db::TRANSACTION_PREFIX_NAME,
+    define_schema,
+    schema::{KeyCodec, ValueCodec},
+};
+use starcoin_types::transaction::Transaction as TxnType;
 
-define_storage!(
-    TransactionStorage,
-    HashValue,
-    Transaction,
-    TRANSACTION_PREFIX_NAME
-);
+define_schema!(Transaction, HashValue, TxnType, TRANSACTION_PREFIX_NAME);
 
-impl ValueCodec for Transaction {
+impl KeyCodec<Transaction> for HashValue {
+    fn encode_key(&self) -> Result<Vec<u8>> {
+        self.encode()
+    }
+    fn decode_key(data: &[u8]) -> Result<Self> {
+        Self::decode(data)
+    }
+}
+
+impl ValueCodec<Transaction> for TxnType {
     fn encode_value(&self) -> Result<Vec<u8>> {
         self.encode()
     }
@@ -25,7 +31,7 @@ impl ValueCodec for Transaction {
         Self::decode(data)
     }
 }
-
+/*
 impl TransactionStore for TransactionStorage {
     fn get_transaction(&self, txn_hash: HashValue) -> Result<Option<Transaction>> {
         self.get(txn_hash)
@@ -45,6 +51,7 @@ impl TransactionStore for TransactionStorage {
         self.multiple_get(txn_hash_vec)
     }
 }
+*/
 
 #[cfg(test)]
 mod test;

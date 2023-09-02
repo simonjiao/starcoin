@@ -18,6 +18,7 @@ use starcoin_crypto::HashValue;
 use starcoin_executor::VMMetrics;
 use starcoin_logger::prelude::*;
 use starcoin_open_block::OpenedBlock;
+use starcoin_schemadb::SchemaBatch;
 use starcoin_state_api::{AccountStateReader, ChainStateReader, ChainStateWriter};
 use starcoin_statedb::ChainStateDB;
 use starcoin_storage::Store;
@@ -477,6 +478,7 @@ impl BlockChain {
             storage.save_contract_events(*info_id, events)?;
         }
 
+        let batch = SchemaBatch::new();
         storage.save_transaction_infos(
             txn_infos
                 .into_iter()
@@ -493,6 +495,7 @@ impl BlockChain {
                     )
                 })
                 .collect(),
+            &batch,
         )?;
 
         let txn_id_vec = transactions
@@ -500,7 +503,9 @@ impl BlockChain {
             .map(|user_txn| user_txn.id())
             .collect::<Vec<HashValue>>();
         // save transactions
-        storage.save_transaction_batch(transactions)?;
+        storage.save_transaction_batch(transactions, &batch)?;
+
+        storage.db().write_schemas(batch)?;
 
         // save block's transactions
         storage.save_block_transaction_ids(block_id, txn_id_vec)?;
@@ -620,10 +625,11 @@ impl ChainReader for BlockChain {
         self.storage.get_transaction(txn_hash)
     }
 
-    fn get_transaction_info(&self, txn_hash: HashValue) -> Result<Option<RichTransactionInfo>> {
+    fn get_transaction_info(&self, txn_hash: &HashValue) -> Result<Option<RichTransactionInfo>> {
         let txn_info_ids = self
             .storage
-            .get_transaction_info_ids_by_txn_hash(txn_hash)?;
+            .get_transaction_info_ids_by_txn_hash(txn_hash)?
+            .unwrap_or_default();
         for txn_info_id in txn_info_ids {
             let txn_info = self.storage.get_transaction_info(txn_info_id)?;
             if let Some(txn_info) = txn_info {

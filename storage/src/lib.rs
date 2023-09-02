@@ -1,6 +1,11 @@
 // Copyright (c) The Starcoin Core Contributors
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::schema::{
+    Transaction as TxnSchema, TransactionInfo as TxnInfoSchema,
+    TransactionInfoHash as TxnInfoHashSchema, TransactionInfoHashStorage, TransactionInfoStorage,
+    TransactionStorage,
+};
 use crate::{
     accumulator::{AccumulatorStorage, BlockAccumulatorStorage, TransactionAccumulatorStorage},
     block::BlockStorage,
@@ -10,8 +15,6 @@ use crate::{
     state_node::StateStorage,
     storage::{CodecKVStore, CodecWriteBatch, StorageInstance},
     table_info::{TableInfoStorage, TableInfoStore},
-    transaction::TransactionStorage,
-    transaction_info::{TransactionInfoHashStorage, TransactionInfoStorage},
 };
 use anyhow::{bail, format_err, Error, Result};
 use network_p2p_types::peer_id::PeerId;
@@ -26,6 +29,7 @@ pub use starcoin_schemadb::db::{
     TRANSACTION_ACCUMULATOR_NODE_PREFIX_NAME, TRANSACTION_INFO_HASH_PREFIX_NAME,
     TRANSACTION_INFO_PREFIX_NAME, TRANSACTION_INFO_PREFIX_NAME_V2, TRANSACTION_PREFIX_NAME,
 };
+use starcoin_schemadb::{SchemaBatch, DB};
 use starcoin_state_store_api::{StateNode, StateNodeStore};
 use starcoin_types::{
     account_address::AccountAddress,
@@ -61,12 +65,11 @@ pub mod storage;
 pub mod table_info;
 #[cfg(test)]
 mod tests;
-pub mod transaction;
-pub mod transaction_info;
 mod upgrade;
 
 #[macro_use]
 pub mod storage_macros;
+pub mod schema;
 
 pub trait BlockStore {
     fn get_startup_info(&self) -> Result<Option<StartupInfo>>;
@@ -133,12 +136,19 @@ pub trait BlockTransactionInfoStore {
     fn get_transaction_info(&self, id: HashValue) -> Result<Option<RichTransactionInfo>>;
     fn get_transaction_info_by_txn_hash(
         &self,
-        txn_hash: HashValue,
+        txn_hash: &HashValue,
     ) -> Result<Vec<RichTransactionInfo>>;
     /// Get transaction info ids by transaction hash, one transaction may be in different chain branch, so produce multiply transaction info.
     /// if not transaction info match with the `txn_hash`, return empty Vec.
-    fn get_transaction_info_ids_by_txn_hash(&self, txn_hash: HashValue) -> Result<Vec<HashValue>>;
-    fn save_transaction_infos(&self, vec_txn_info: Vec<RichTransactionInfo>) -> Result<()>;
+    fn get_transaction_info_ids_by_txn_hash(
+        &self,
+        txn_hash: &HashValue,
+    ) -> Result<Option<Vec<HashValue>>>;
+    fn save_transaction_infos(
+        &self,
+        vec_txn_info: Vec<RichTransactionInfo>,
+        batch: &SchemaBatch,
+    ) -> Result<()>;
     fn get_transaction_infos(
         &self,
         ids: Vec<HashValue>,
@@ -162,13 +172,14 @@ pub trait ContractEventStore {
 pub trait TransactionStore {
     fn get_transaction(&self, txn_hash: HashValue) -> Result<Option<Transaction>>;
     fn save_transaction(&self, txn_info: Transaction) -> Result<()>;
-    fn save_transaction_batch(&self, txn_vec: Vec<Transaction>) -> Result<()>;
+    fn save_transaction_batch(&self, txn_vec: Vec<Transaction>, batch: &SchemaBatch) -> Result<()>;
     fn get_transactions(&self, txn_hash_vec: Vec<HashValue>) -> Result<Vec<Option<Transaction>>>;
 }
 
 // TODO: remove Arc<dyn Store>, we can clone Storage directly.
 #[derive(Clone)]
 pub struct Storage {
+    db: Arc<DB>,
     transaction_info_storage: TransactionInfoStorage,
     transaction_info_hash_storage: TransactionInfoHashStorage,
     transaction_storage: TransactionStorage,
@@ -186,9 +197,10 @@ pub struct Storage {
 impl Storage {
     pub fn new(instance: StorageInstance) -> Result<Self> {
         let storage = Self {
-            transaction_info_storage: TransactionInfoStorage::new(instance.clone()),
-            transaction_info_hash_storage: TransactionInfoHashStorage::new(instance.clone()),
-            transaction_storage: TransactionStorage::new(instance.clone()),
+            db: Arc::new(DB::new("starcoindb".to_string(), instance.db().unwrap())),
+            transaction_info_storage: TransactionInfoStorage::new(),
+            transaction_info_hash_storage: TransactionInfoHashStorage::new(),
+            transaction_storage: TransactionStorage::new(),
             block_storage: BlockStorage::new(instance.clone()),
             state_node_storage: StateStorage::new(instance.clone()),
             block_accumulator_storage: AccumulatorStorage::new_block_accumulator_storage(
@@ -213,6 +225,10 @@ impl Storage {
         &self,
     ) -> AccumulatorStorage<TransactionAccumulatorStorage> {
         self.transaction_accumulator_storage.clone()
+    }
+
+    pub fn ledger_db(&self) -> &DB {
+        self.db.as_ref()
     }
 }
 
@@ -396,15 +412,18 @@ impl BlockInfoStore for Storage {
 
 impl BlockTransactionInfoStore for Storage {
     fn get_transaction_info(&self, id: HashValue) -> Result<Option<RichTransactionInfo>> {
-        self.transaction_info_storage.get_transaction_info(id)
+        self.transaction_info_storage
+            .get_item(&id)?
+            .map(|v| Ok(Some(v)))
+            .unwrap_or_else(|| self.db.get::<TxnInfoSchema>(&id))
     }
 
     fn get_transaction_info_by_txn_hash(
         &self,
-        txn_hash: HashValue,
+        txn_hash: &HashValue,
     ) -> Result<Vec<RichTransactionInfo>, Error> {
         let mut transaction_info_vec = vec![];
-        if let Some(transaction_info_ids) = self.transaction_info_hash_storage.get(txn_hash)? {
+        if let Some(transaction_info_ids) = self.get_transaction_info_ids_by_txn_hash(txn_hash)? {
             let txn_infos = self.get_transaction_infos(transaction_info_ids)?;
             for transaction_info in txn_infos.into_iter().flatten() {
                 transaction_info_vec.push(transaction_info);
@@ -415,24 +434,59 @@ impl BlockTransactionInfoStore for Storage {
 
     fn get_transaction_info_ids_by_txn_hash(
         &self,
-        txn_hash: HashValue,
-    ) -> Result<Vec<HashValue>, Error> {
+        txn_hash: &HashValue,
+    ) -> Result<Option<Vec<HashValue>>, Error> {
         self.transaction_info_hash_storage
-            .get_transaction_info_ids_by_hash(txn_hash)
+            .get_item(txn_hash)?
+            .map(|v| Ok(Some(v)))
+            .unwrap_or_else(|| self.db.get::<TxnInfoHashSchema>(txn_hash))
     }
 
-    fn save_transaction_infos(&self, vec_txn_info: Vec<RichTransactionInfo>) -> Result<(), Error> {
+    fn save_transaction_infos(
+        &self,
+        vec_txn_info: Vec<RichTransactionInfo>,
+        batch: &SchemaBatch,
+    ) -> Result<(), Error> {
+        let mut local = BTreeMap::new();
+        let vec_txn_info = vec_txn_info
+            .into_iter()
+            .map(|i| (i.transaction_hash(), i.id(), i))
+            .collect::<Vec<_>>();
+        for (hash, id, _) in &vec_txn_info {
+            let id_vec = local.entry(*hash).or_insert(
+                self.get_transaction_info_ids_by_txn_hash(hash)?
+                    .unwrap_or(vec![*id]),
+            );
+            if !id_vec.contains(id) {
+                id_vec.push(*id);
+            }
+        }
+        for (key, val) in local.iter() {
+            batch.put::<TxnInfoHashSchema>(key, val)?;
+        }
+        for (key, _, val) in &vec_txn_info {
+            batch.put::<TxnInfoSchema>(key, val)?;
+        }
         self.transaction_info_hash_storage
-            .save_transaction_infos(vec_txn_info.as_slice())?;
+            .save_items(local.into_iter())?;
         self.transaction_info_storage
-            .save_transaction_infos(vec_txn_info)
+            .save_items(vec_txn_info.into_iter().map(|i| (i.0, i.2)))?;
+
+        Ok(())
     }
 
     fn get_transaction_infos(
         &self,
         ids: Vec<HashValue>,
     ) -> Result<Vec<Option<RichTransactionInfo>>> {
-        self.transaction_info_storage.get_transaction_infos(ids)
+        let mut cached = self.transaction_info_storage.get_items(ids.as_ref())?;
+        for (info, id) in cached.iter_mut().zip(&ids) {
+            if info.is_none() {
+                let mut db_item = self.db.get::<TxnInfoSchema>(id)?;
+                std::mem::swap(info, &mut db_item);
+            }
+        }
+        Ok(cached)
     }
 }
 
@@ -455,22 +509,47 @@ impl ContractEventStore for Storage {
 
 impl TransactionStore for Storage {
     fn get_transaction(&self, txn_hash: HashValue) -> Result<Option<Transaction>, Error> {
-        self.transaction_storage.get(txn_hash)
+        self.transaction_storage
+            .get_item(&txn_hash)?
+            .map(|v| Ok(Some(v)))
+            .unwrap_or_else(|| self.db.get::<TxnSchema>(&txn_hash))
     }
 
     fn save_transaction(&self, txn: Transaction) -> Result<(), Error> {
-        self.transaction_storage.put(txn.id(), txn)
+        let id = txn.id();
+        self.db
+            .put::<TxnSchema>(&id, &txn)
+            .and_then(|_| self.transaction_storage.save_item(id, txn))
     }
 
-    fn save_transaction_batch(&self, txn_vec: Vec<Transaction>) -> Result<(), Error> {
-        self.transaction_storage.save_transaction_batch(txn_vec)
+    fn save_transaction_batch(
+        &self,
+        txn_vec: Vec<Transaction>,
+        batch: &SchemaBatch,
+    ) -> Result<(), Error> {
+        let txns = txn_vec
+            .into_iter()
+            .map(|txn| (txn.id(), txn))
+            .collect::<Vec<_>>();
+
+        for (k, v) in &txns {
+            batch.put::<TxnSchema>(k, v)?;
+        }
+        self.transaction_storage.save_items(txns.into_iter())
     }
 
     fn get_transactions(
         &self,
         txn_hash_vec: Vec<HashValue>,
     ) -> Result<Vec<Option<Transaction>>, Error> {
-        self.transaction_storage.multiple_get(txn_hash_vec)
+        let mut cached = self.transaction_storage.get_items(txn_hash_vec.as_ref())?;
+        for (txn, hash) in cached.iter_mut().zip(&txn_hash_vec) {
+            if txn.is_none() {
+                let mut db_item = self.db.get::<TxnSchema>(hash)?;
+                std::mem::swap(txn, &mut db_item);
+            }
+        }
+        Ok(cached)
     }
 }
 
@@ -485,6 +564,8 @@ pub trait Store:
     + IntoSuper<dyn StateNodeStore>
     + TableInfoStore
 {
+    fn db(&self) -> Arc<DB>;
+
     fn get_transaction_info_by_block_and_index(
         &self,
         block_id: HashValue,
@@ -547,6 +628,10 @@ impl<'a, T: 'a + StateNodeStore> IntoSuper<dyn StateNodeStore + 'a> for T {
 }
 
 impl Store for Storage {
+    fn db(&self) -> Arc<DB> {
+        self.db.clone()
+    }
+
     fn get_accumulator_store(
         &self,
         accumulator_type: AccumulatorStoreType,

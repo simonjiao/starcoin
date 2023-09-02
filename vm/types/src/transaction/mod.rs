@@ -843,6 +843,24 @@ impl Deref for RichTransactionInfo {
     }
 }
 
+impl Default for RichTransactionInfo {
+    fn default() -> Self {
+        Self {
+            block_id: Default::default(),
+            block_number: Default::default(),
+            transaction_info: TransactionInfo {
+                transaction_hash: Default::default(),
+                state_root_hash: Default::default(),
+                event_root_hash: Default::default(),
+                gas_used: 0,
+                status: KeptVMStatus::Executed,
+            },
+            transaction_index: Default::default(),
+            transaction_global_index: Default::default(),
+        }
+    }
+}
+
 impl RichTransactionInfo {
     pub fn new(
         block_id: HashValue,
@@ -858,6 +876,22 @@ impl RichTransactionInfo {
             transaction_index,
             transaction_global_index,
         }
+    }
+
+    pub fn random() -> Self {
+        Self::new(
+            HashValue::random(),
+            rand::random(),
+            TransactionInfo::new(
+                HashValue::random(),
+                HashValue::zero(),
+                vec![].as_slice(),
+                1,
+                KeptVMStatus::Executed,
+            ),
+            rand::random(),
+            rand::random(),
+        )
     }
 
     pub fn block_id(&self) -> HashValue {
@@ -882,6 +916,21 @@ pub enum Transaction {
     UserTransaction(SignedUserTransaction),
     /// Transaction to update the block metadata resource at the beginning of a block.
     BlockMetadata(BlockMetadata),
+}
+
+impl Default for Transaction {
+    fn default() -> Self {
+        Self::BlockMetadata(BlockMetadata::new(
+            Default::default(),
+            0u64,
+            AccountAddress::ZERO,
+            None,
+            0u64,
+            0u64,
+            ChainId::from(0),
+            0u64,
+        ))
+    }
 }
 
 impl Transaction {

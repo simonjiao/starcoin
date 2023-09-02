@@ -87,11 +87,9 @@ impl StorageInstance {
         }
     }
 
-    pub fn db(&self) -> Option<&DBStorage> {
+    pub fn db(&self) -> Option<&Arc<DBStorage>> {
         match self {
-            StorageInstance::DB { db } | StorageInstance::CacheAndDb { cache: _, db } => {
-                Some(db.as_ref())
-            }
+            StorageInstance::DB { db } | StorageInstance::CacheAndDb { cache: _, db } => Some(db),
             _ => None,
         }
     }
