@@ -455,12 +455,14 @@ impl BlockTransactionInfoStore for Storage {
         for (hash, id, _) in &vec_txn_info {
             let id_vec = local.entry(*hash).or_insert(
                 self.get_transaction_info_ids_by_txn_hash(hash)?
-                    .unwrap_or(vec![*id]),
+                    .unwrap_or_default(),
             );
-            if !id_vec.contains(id) {
-                id_vec.push(*id);
-            }
+            id_vec.push(*id);
         }
+        local.iter_mut().for_each(|(_, v)| {
+            v.sort();
+            v.dedup();
+        });
         for (key, val) in local.iter() {
             batch.put::<TxnInfoHashSchema>(key, val)?;
         }
