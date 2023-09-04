@@ -10667,6 +10667,7 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
+ "rayon",
  "rocksdb",
  "serde 1.0.152",
  "starcoin-accumulator",

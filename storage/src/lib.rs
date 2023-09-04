@@ -18,6 +18,8 @@ use crate::{
 };
 use anyhow::{bail, format_err, Error, Result};
 use network_p2p_types::peer_id::PeerId;
+use parking_lot::Mutex;
+use rayon::prelude::*;
 use starcoin_accumulator::{node::AccumulatorStoreType, AccumulatorTreeStore};
 use starcoin_crypto::HashValue;
 pub use starcoin_schemadb::db::{
@@ -39,6 +41,7 @@ use starcoin_types::{
     transaction::{RichTransactionInfo, Transaction},
 };
 use starcoin_vm_types::state_store::table::{TableHandle, TableInfo};
+use std::collections::btree_map::Entry;
 use std::{
     collections::BTreeMap,
     fmt::{Debug, Display, Formatter},
@@ -447,32 +450,44 @@ impl BlockTransactionInfoStore for Storage {
         vec_txn_info: Vec<RichTransactionInfo>,
         batch: &SchemaBatch,
     ) -> Result<(), Error> {
-        let mut local = BTreeMap::new();
-        let vec_txn_info = vec_txn_info
-            .into_iter()
-            .map(|i| (i.transaction_hash(), i.id(), i))
-            .collect::<Vec<_>>();
-        for (hash, id, _) in &vec_txn_info {
-            let id_vec = local.entry(*hash).or_insert(
-                self.get_transaction_info_ids_by_txn_hash(hash)?
-                    .unwrap_or_default(),
-            );
-            id_vec.push(*id);
-        }
-        local.iter_mut().for_each(|(_, v)| {
-            v.sort();
-            v.dedup();
-        });
-        for (key, val) in local.iter() {
-            batch.put::<TxnInfoHashSchema>(key, val)?;
-        }
-        for (key, _, val) in &vec_txn_info {
-            batch.put::<TxnInfoSchema>(key, val)?;
-        }
-        self.transaction_info_hash_storage
-            .save_items(local.into_iter())?;
-        self.transaction_info_storage
-            .save_items(vec_txn_info.into_iter().map(|i| (i.0, i.2)))?;
+        let local = Mutex::new(BTreeMap::new());
+        let _ = vec_txn_info
+            .into_par_iter()
+            .map(|i| {
+                let hash = i.transaction_hash();
+                let id = i.id();
+
+                let mut locked = local.lock();
+                let entry = locked.entry(hash);
+                match entry {
+                    Entry::Vacant(entry) => {
+                        self.get_transaction_info_ids_by_txn_hash(&hash).map(|res| {
+                            let mut id_vec = res.unwrap_or_default();
+                            id_vec.push(id);
+                            entry.insert(id_vec);
+                        })
+                    }
+                    Entry::Occupied(entry) => {
+                        entry.into_mut().push(id);
+                        Ok(())
+                    }
+                }
+                .and_then(|_| batch.put::<TxnInfoSchema>(&hash, &i))
+                .and_then(|_| self.transaction_info_storage.save_item(hash, i))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        local
+            .into_inner()
+            .into_par_iter()
+            .map(|(k, mut v)| {
+                v.sort();
+                v.dedup();
+                batch
+                    .put::<TxnInfoHashSchema>(&k, &v)
+                    .and_then(|_| self.transaction_info_hash_storage.save_item(k, v))
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(())
     }
