@@ -24,13 +24,19 @@ const RES_FDS: u64 = 4096;
 #[allow(clippy::upper_case_acronyms)]
 pub struct DBStorage {
     name: String, // for logging
-    // Todo, make me private to other crates
-    pub db: DB,
+    db: DB,
     cfs: Vec<ColumnFamilyName>,
-    // Todo, make me private to other crates
-    pub metrics: Option<StorageMetrics>,
+    metrics: Option<StorageMetrics>,
 }
 impl DBStorage {
+    pub fn db(&self) -> &DB {
+        &self.db
+    }
+
+    pub fn metrics(&self) -> Option<&StorageMetrics> {
+        self.metrics.as_ref()
+    }
+
     pub fn new<P: AsRef<Path> + Clone>(
         db_root_path: P,
         rocksdb_config: RocksdbConfig,
@@ -312,6 +318,7 @@ impl DBStorage {
     }
 }
 
+// The new Apis
 impl DBStorage {
     pub fn open(
         name: &str,
