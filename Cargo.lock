@@ -9127,6 +9127,7 @@ dependencies = [
  "bcs-ext",
  "futures 0.3.26",
  "hex",
+ "lru 0.7.8",
  "parking_lot 0.12.1",
  "rand 0.8.5",
  "rand_core 0.6.4",

@@ -2,32 +2,40 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::account::Account;
+use crate::account_schemadb::{GlobalSettingKey, GlobalValue};
 use crate::account_storage::AccountStorage;
 use anyhow::format_err;
+use lru::LruCache;
 use parking_lot::RwLock;
 use rand::prelude::*;
-use starcoin_account_api::error::AccountError;
-use starcoin_account_api::{AccountInfo, AccountPrivateKey, AccountPublicKey, AccountResult};
-use starcoin_crypto::ed25519::Ed25519PrivateKey;
-use starcoin_crypto::{Uniform, ValidCryptoMaterial};
+use starcoin_account_api::{
+    error::AccountError, AccountInfo, AccountPrivateKey, AccountPublicKey, AccountResult, Setting,
+};
+use starcoin_crypto::{ed25519::Ed25519PrivateKey, Uniform, ValidCryptoMaterial};
 use starcoin_logger::prelude::*;
-use starcoin_types::genesis_config::ChainId;
-use starcoin_types::sign_message::{SignedMessage, SigningMessage};
 use starcoin_types::{
     account_address::AccountAddress,
     account_config::token_code::TokenCode,
+    genesis_config::ChainId,
+    sign_message::{SignedMessage, SigningMessage},
     transaction::{RawUserTransaction, SignedUserTransaction},
 };
-use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::ops::Add;
-use std::time::Duration;
-use std::time::Instant;
+use std::{
+    collections::HashMap,
+    convert::TryFrom,
+    ops::Add,
+    time::{Duration, Instant},
+};
 
 /// Account manager
 pub struct AccountManager {
     store: AccountStorage,
     key_cache: RwLock<PasswordCache>,
+    setting: RwLock<LruCache<AccountAddress, Setting>>,
+    private_key: RwLock<LruCache<AccountAddress, Vec<u8>>>, //EncryptedPrivateKey,
+    public_key: RwLock<LruCache<AccountAddress, AccountPublicKey>>,
+    global_value: RwLock<LruCache<GlobalSettingKey, Vec<AccountAddress>>>,
+    accepted_token: RwLock<LruCache<AccountAddress, Vec<TokenCode>>>,
     chain_id: ChainId,
 }
 
@@ -63,11 +71,18 @@ impl PasswordCache {
     }
 }
 
+const PER_LRU_CACHE_SIZE: usize = 1024;
+
 impl AccountManager {
     pub fn new(storage: AccountStorage, chain_id: ChainId) -> AccountResult<Self> {
         let manager = Self {
             store: storage,
             key_cache: RwLock::new(PasswordCache::default()),
+            setting: RwLock::new(LruCache::new(PER_LRU_CACHE_SIZE)),
+            private_key: RwLock::new(LruCache::new(PER_LRU_CACHE_SIZE)),
+            public_key: RwLock::new(LruCache::new(PER_LRU_CACHE_SIZE)),
+            global_value: RwLock::new(LruCache::new(PER_LRU_CACHE_SIZE)),
+            accepted_token: RwLock::new(LruCache::new(PER_LRU_CACHE_SIZE)),
             chain_id,
         };
         Ok(manager)
@@ -172,9 +187,11 @@ impl AccountManager {
     }
 
     pub fn contains(&self, address: &AccountAddress) -> AccountResult<bool> {
-        self.store
-            .contain_address(*address)
-            .map_err(AccountError::StoreError)
+        Ok(self.public_key.read().contains(address)
+            || self
+                .store
+                .contain_address(*address)
+                .map_err(AccountError::StoreError)?)
     }
 
     pub fn default_account_info(&self) -> AccountResult<Option<AccountInfo>> {

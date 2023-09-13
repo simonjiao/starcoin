@@ -16,6 +16,7 @@ starcoin-logger = { workspace = true }
 starcoin-storage = { workspace = true }
 starcoin-types = { workspace = true }
 starcoin-schemadb = { workspace = true }
+lru = { workspace = true }
 
 [dev-dependencies]
 hex = { workspace = true }

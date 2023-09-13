@@ -89,13 +89,7 @@ impl AccountStorage {
     }
 
     pub fn contain_address(&self, address: AccountAddress) -> Result<bool> {
-        match self.get_public_key(&address)? {
-            Some(v) => {
-                let _ = Into::<AccountPublicKey>::into(v);
-                Ok(true)
-            }
-            None => Ok(false),
-        }
+        Ok(self.get_public_key(&address)?.is_some())
     }
 
     fn get_addresses(&self, global_setting_key: &GlobalSettingKey) -> Result<Option<GlobalValue>> {
