@@ -892,6 +892,8 @@ pub struct BlockInfo {
     pub txn_accumulator_info: AccumulatorInfo,
     /// The block accumulator info.
     pub block_accumulator_info: AccumulatorInfo,
+    /// the dag block accumulator info
+    pub dag_accumulator_info: AccumulatorInfo,
 }
 
 impl BlockInfo {
@@ -900,12 +902,14 @@ impl BlockInfo {
         total_difficulty: U256,
         txn_accumulator_info: AccumulatorInfo,
         block_accumulator_info: AccumulatorInfo,
+        dag_accumulator_info: AccumulatorInfo,
     ) -> Self {
         Self {
             block_id,
             total_difficulty,
             txn_accumulator_info,
             block_accumulator_info,
+            dag_accumulator_info,
         }
     }
 
@@ -937,6 +941,7 @@ impl Sample for BlockInfo {
             total_difficulty: 0.into(),
             txn_accumulator_info: AccumulatorInfo::sample(),
             block_accumulator_info: AccumulatorInfo::sample(),
+            dag_accumulator_info: AccumulatorInfo::sample(),
         }
     }
 }
