@@ -627,7 +627,7 @@ impl StarcoinVM {
                     sender
                 );
                 session
-                    .execute_entry_function(
+                    .validate_and_execute_entry_function(
                         init_script.module(),
                         init_script.function(),
                         init_script.ty_args().to_vec(),
@@ -672,7 +672,7 @@ impl StarcoinVM {
                         self.check_move_version(s.version() as u64)?;
                     };
                     debug!("TransactionPayload::{:?}", script);
-                    session.execute_script(
+                    session.validate_and_execute_script(
                         script.code().to_vec(),
                         script.ty_args().to_vec(),
                         script.args().to_vec(),
@@ -682,7 +682,7 @@ impl StarcoinVM {
                 }
                 TransactionPayload::ScriptFunction(script_function) => {
                     debug!("TransactionPayload::{:?}", script_function);
-                    session.execute_entry_function(
+                    session.validate_and_execute_entry_function(
                         script_function.module(),
                         script_function.function(),
                         script_function.ty_args().to_vec(),

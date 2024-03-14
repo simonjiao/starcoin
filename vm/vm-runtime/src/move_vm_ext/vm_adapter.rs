@@ -1,26 +1,90 @@
 // Copyright (c) The Starcoin Core Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use move_binary_format::errors::*;
 use move_binary_format::{
-    access::ModuleAccess, compatibility::Compatibility, normalized, CompiledModule, IndexKind,
+    access::ModuleAccess, compatibility::Compatibility, errors::*, normalized, CompiledModule,
+    IndexKind,
 };
-use move_core_types::value::MoveValue;
-use move_core_types::vm_status::StatusCode;
 use move_core_types::{
     account_address::AccountAddress,
-    identifier::IdentStr,
+    ident_str,
+    identifier::{IdentStr, Identifier},
     language_storage::{ModuleId, TypeTag},
     resolver::*,
+    value::MoveValue,
+    vm_status::StatusCode,
 };
-use move_vm_runtime::loader::Function;
-use move_vm_runtime::session::{LoadedFunctionInstantiation, SerializedReturnValues, Session};
-use move_vm_types::gas::GasMeter;
-use move_vm_types::loaded_data::runtime_types::Type;
-use std::borrow::Borrow;
-use std::collections::BTreeSet;
-use std::sync::Arc;
+use move_vm_runtime::{
+    loader::Function,
+    session::{LoadedFunctionInstantiation, SerializedReturnValues, Session},
+};
+use move_vm_types::{gas::GasMeter, loaded_data::runtime_types::Type};
+use once_cell::sync::Lazy;
+use starcoin_logger::prelude::debug;
+use starcoin_vm_types::language_storage::FunctionId;
+use std::{
+    borrow::Borrow,
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 use tracing::warn;
+
+type ConstructorMap = Lazy<BTreeMap<String, FunctionId>>;
+
+static NEW_ALLOWED_STRUCTS: ConstructorMap = Lazy::new(|| {
+    [
+        (
+            "0x1::string::String",
+            FunctionId {
+                module: ModuleId::new(AccountAddress::ONE, Identifier::from(ident_str!("string"))),
+                function: Identifier::from(ident_str!("utf8")),
+            },
+        ),
+        // not implemented in starcoin-framework
+        (
+            "0x1::object::Object",
+            FunctionId {
+                module: ModuleId::new(AccountAddress::ONE, Identifier::from(ident_str!("object"))),
+                function: Identifier::from(ident_str!("address_to_object")),
+            },
+        ),
+        // not implemented in starcoin-framework
+        (
+            "0x1::option::Option",
+            FunctionId {
+                module: ModuleId::new(AccountAddress::ONE, Identifier::from(ident_str!("option"))),
+                function: Identifier::from(ident_str!("from_vec")),
+            },
+        ),
+        (
+            "0x1::fixed_point32::FixedPoint32",
+            FunctionId {
+                module: ModuleId::new(
+                    AccountAddress::ONE,
+                    Identifier::from(ident_str!("fixed_point32")),
+                ),
+                function: Identifier::from(ident_str!("create_from_raw_value")),
+            },
+        ),
+        (
+            "0x1::fixed_point64::FixedPoint64",
+            FunctionId {
+                module: ModuleId::new(
+                    AccountAddress::ONE,
+                    Identifier::from(ident_str!("fixed_point64")),
+                ),
+                function: Identifier::from(ident_str!("create_from_raw_value")),
+            },
+        ),
+    ]
+    .into_iter()
+    .map(|(s, validator)| (s.to_string(), validator))
+    .collect()
+});
+
+fn get_allowed_structs() -> &'static ConstructorMap {
+    &NEW_ALLOWED_STRUCTS
+}
 
 /// Publish module bundle options
 /// - force_publish: force publish without compatibility check.
@@ -42,6 +106,7 @@ impl<'r, 'l, R> From<Session<'r, 'l, R>> for SessionAdapter<'r, 'l, R> {
     }
 }
 
+#[allow(clippy::from_over_into)]
 impl<'r, 'l, R> Into<Session<'r, 'l, R>> for SessionAdapter<'r, 'l, R> {
     fn into(self) -> Session<'r, 'l, R> {
         self.session
@@ -66,7 +131,7 @@ impl<'r, 'l, R: MoveResolver> SessionAdapter<'r, 'l, R> {
     }
 
     /// wrapper of Session, push signer as the first argument of function.
-    pub fn execute_entry_function(
+    pub fn validate_and_execute_entry_function(
         &mut self,
         module: &ModuleId,
         function_name: &IdentStr,
@@ -75,9 +140,12 @@ impl<'r, 'l, R: MoveResolver> SessionAdapter<'r, 'l, R> {
         gas_meter: &mut impl GasMeter,
         sender: AccountAddress,
     ) -> VMResult<SerializedReturnValues> {
-        let (_, func, _) = self
+        let (_, func, loaded_func) = self
             .session
             .load_function(module, function_name, &ty_args)?;
+
+        self.validate_combine_singer_and_args(vec![sender], args.as_ref(), &loaded_func)?;
+
         let final_args = Self::check_and_rearrange_args_by_signer_position(
             func,
             args.into_iter().map(|b| b.borrow().to_vec()).collect(),
@@ -88,34 +156,7 @@ impl<'r, 'l, R: MoveResolver> SessionAdapter<'r, 'l, R> {
     }
 
     /// wrapper of Session, push signer as the first argument of function.
-    pub fn execute_function_bypass_visibility(
-        &mut self,
-        module: &ModuleId,
-        function_name: &IdentStr,
-        ty_args: Vec<TypeTag>,
-        args: Vec<impl Borrow<[u8]>>,
-        gas_meter: &mut impl GasMeter,
-        sender: AccountAddress,
-    ) -> VMResult<SerializedReturnValues> {
-        let (_, func, _) = self
-            .session
-            .load_function(module, function_name, &ty_args)?;
-        let final_args = Self::check_and_rearrange_args_by_signer_position(
-            func,
-            args.into_iter().map(|b| b.borrow().to_vec()).collect(),
-            sender,
-        )?;
-        self.session.execute_function_bypass_visibility(
-            module,
-            function_name,
-            ty_args,
-            final_args,
-            gas_meter,
-        )
-    }
-
-    /// wrapper of Session, push signer as the first argument of function.
-    pub fn execute_script(
+    pub fn validate_and_execute_script(
         &mut self,
         script: impl Borrow<[u8]>,
         ty_args: Vec<TypeTag>,
@@ -123,7 +164,10 @@ impl<'r, 'l, R: MoveResolver> SessionAdapter<'r, 'l, R> {
         gas_meter: &mut impl GasMeter,
         sender: AccountAddress,
     ) -> VMResult<SerializedReturnValues> {
-        let (main, _) = self.session.load_script(script.borrow(), ty_args.clone())?;
+        let (main, loaded_func) = self.session.load_script(script.borrow(), ty_args.clone())?;
+
+        self.validate_combine_singer_and_args(vec![sender], args.as_ref(), &loaded_func)?;
+
         let final_args = Self::check_and_rearrange_args_by_signer_position(
             main,
             args.into_iter().map(|b| b.borrow().to_vec()).collect(),
@@ -365,10 +409,104 @@ impl<'r, 'l, R: MoveResolver> SessionAdapter<'r, 'l, R> {
         Ok(())
     }
 
-    /// Clear vm runtimer loader's cache to reload new modules from state cache
+    /// Clear vm runtime loader's cache to reload new modules from state cache
     fn empty_loader_cache(&self) -> VMResult<()> {
         self.session.mark_loader_cache_as_invaliddated();
         self.session.flush_loader_cache_if_invalidated();
+        Ok(())
+    }
+
+    // Return whether the argument is valid/allowed and whether it needs construction.
+    fn is_valid_txn_arg(&self, typ: &Type, allowed_structs: &ConstructorMap) -> bool {
+        use move_vm_types::loaded_data::runtime_types::Type::*;
+
+        match typ {
+            Bool | U8 | U16 | U32 | U64 | U128 | U256 | Address => true,
+            Vector(inner) => self.is_valid_txn_arg(inner, allowed_structs),
+            Struct(idx) | StructInstantiation(idx, _) => self
+                .session
+                .get_struct_type(*idx)
+                .map(|st| {
+                    let full_name = format!("{}::{}", st.module.short_str_lossless(), st.name);
+                    allowed_structs.contains_key(&full_name)
+                })
+                .unwrap_or_default(),
+            Signer | Reference(_) | MutableReference(_) | TyParam(_) => false,
+        }
+    }
+
+    /// Validate and generate args for entry function
+    /// validation includes:
+    /// 1. return signature is empty
+    /// 2. number of signers is same as the number of senders
+    /// 3. check arg types are allowed after signers
+    ///
+    fn validate_combine_singer_and_args(
+        &self,
+        senders: Vec<AccountAddress>,
+        args: &[impl Borrow<[u8]>],
+        func: &LoadedFunctionInstantiation,
+    ) -> VMResult<()> {
+        debug!("validate script function");
+        Self::check_script_return(func.return_.clone())?;
+
+        let mut signer_param_cnt = 0;
+        // find all signer params at the beginning
+        for ty in func.parameters.iter() {
+            match ty {
+                Type::Signer => signer_param_cnt += 1,
+                Type::Reference(inner_type) => {
+                    if matches!(&**inner_type, Type::Signer) {
+                        signer_param_cnt += 1;
+                    }
+                }
+                _ => (),
+            }
+        }
+
+        let allowed_structs = get_allowed_structs();
+        // Need to keep this here to ensure we return the historic correct error code for replay
+        for ty in func.parameters[signer_param_cnt..].iter() {
+            let valid =
+                self.is_valid_txn_arg(&ty.subst(&func.type_arguments).unwrap(), allowed_structs);
+            if !valid {
+                return Err(
+                    PartialVMError::new(StatusCode::INVALID_MAIN_FUNCTION_SIGNATURE)
+                        .finish(Location::Undefined),
+                );
+            }
+        }
+
+        if (signer_param_cnt + args.len()) != func.parameters.len() {
+            return Err(
+                PartialVMError::new(StatusCode::NUMBER_OF_ARGUMENTS_MISMATCH)
+                    .finish(Location::Undefined),
+            );
+        }
+
+        // If the invoked function expects one or more signers, we need to check that the number of
+        // signers actually passed is matching first to maintain backward compatibility before
+        // moving on to the validation of non-signer args.
+        // the number of txn senders should be the same number of signers
+        if signer_param_cnt > 0 && senders.len() != signer_param_cnt {
+            return Err(
+                PartialVMError::new(StatusCode::NUMBER_OF_SIGNER_ARGUMENTS_MISMATCH)
+                    .finish(Location::Undefined),
+            );
+        }
+
+        // This also validates that the args are valid. If they are structs, they have to be allowed
+        // and must be constructed successfully. If construction fails, this would fail with a
+        // FAILED_TO_DESERIALIZE_ARGUMENT error.
+        let args = construct_args(
+            &mut self.session,
+            &func.parameters[signer_param_cnt..],
+            args,
+            &func.type_arguments,
+            allowed_structs,
+            false,
+        )?;
+
         Ok(())
     }
 }
