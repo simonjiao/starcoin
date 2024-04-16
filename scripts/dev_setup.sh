@@ -27,8 +27,8 @@ HELM_VERSION=3.2.4
 VAULT_VERSION=1.5.0
 Z3_VERSION=4.8.13
 CVC5_VERSION=0.0.3
-DOTNET_VERSION=5.0
-BOOGIE_VERSION=2.9.6
+DOTNET_VERSION=6.0
+BOOGIE_VERSION=2.15.9
 PYRE_CHECK_VERSION=0.0.59
 NUMPY_VERSION=1.20.1
 ALLURE_VERSION=2.15.pr1135
@@ -473,7 +473,7 @@ function install_dotnet {
     # Below we need to (a) set TERM variable because the .net installer expects it and it is not set
     # in some environments (b) use bash not sh because the installer uses bash features.
     curl -sSL https://dot.net/v1/dotnet-install.sh \
-        | TERM=linux /bin/bash -s -- --channel $DOTNET_VERSION --install-dir "${DOTNET_INSTALL_DIR}" --version 5.0.200
+        | TERM=linux /bin/bash -s -- --channel $DOTNET_VERSION --install-dir "${DOTNET_INSTALL_DIR}" --version 6.0.408
   else
     echo Dotnet already installed.
   fi
