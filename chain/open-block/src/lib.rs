@@ -6,12 +6,10 @@ use starcoin_accumulator::{node::AccumulatorStoreType, Accumulator, MerkleAccumu
 use starcoin_chain_api::ExcludedTxns;
 use starcoin_crypto::HashValue;
 use starcoin_executor::{execute_block_transactions, execute_transactions, VMMetrics};
-use starcoin_force_upgrade::ForceUpgrade;
 use starcoin_logger::prelude::*;
 use starcoin_state_api::{ChainStateReader, ChainStateWriter};
 use starcoin_statedb::ChainStateDB;
 use starcoin_storage::Store;
-use starcoin_types::account::DEFAULT_EXPIRATION_TIME;
 use starcoin_types::block::{Block, BlockNumber};
 use starcoin_types::genesis_config::{ChainId, ConsensusStrategy};
 use starcoin_types::identifier::Identifier;
@@ -26,18 +24,25 @@ use starcoin_types::{
     },
     U256,
 };
-use starcoin_vm_runtime::force_upgrade_management::{
-    get_force_upgrade_account, get_force_upgrade_block_number,
-};
-use starcoin_vm_types::access_path::AccessPath;
-use starcoin_vm_types::account_config::{genesis_address, ModuleUpgradeStrategy};
-use starcoin_vm_types::genesis_config::StdlibVersion;
-use starcoin_vm_types::move_resource::MoveResource;
+use starcoin_vm_types::account_config::genesis_address;
 use starcoin_vm_types::on_chain_config;
-use starcoin_vm_types::on_chain_config::Version;
-use starcoin_vm_types::state_store::state_key::StateKey;
-use starcoin_vm_types::state_view::{StateReaderExt, StateView};
 use std::{convert::TryInto, sync::Arc};
+
+#[cfg(feature = "force-deploy")]
+use {
+    starcoin_force_upgrade::ForceUpgrade,
+    starcoin_types::account::DEFAULT_EXPIRATION_TIME,
+    starcoin_vm_runtime::force_upgrade_management::{
+        get_force_upgrade_account, get_force_upgrade_block_number,
+    },
+    starcoin_vm_types::access_path::AccessPath,
+    starcoin_vm_types::account_config::ModuleUpgradeStrategy,
+    starcoin_vm_types::genesis_config::StdlibVersion,
+    starcoin_vm_types::move_resource::MoveResource,
+    starcoin_vm_types::on_chain_config::Version,
+    starcoin_vm_types::state_store::state_key::StateKey,
+    starcoin_vm_types::state_view::{StateReaderExt, StateView},
+};
 
 pub struct OpenedBlock {
     previous_block_info: BlockInfo,
@@ -235,6 +240,7 @@ impl OpenedBlock {
             };
         }
 
+        #[cfg(feature = "force-deploy")]
         self.execute_extra_txn()
             .expect("Extra txn must be executed successfully");
 
@@ -363,6 +369,7 @@ impl OpenedBlock {
     /// The logic for handling the forced upgrade will be processed.
     /// First, set the account policy in `0x1::PackageTxnManager` to 100,
     /// Second, after the contract deployment is successful, revert it back.
+    #[cfg(feature = "force-deploy")]
     fn execute_extra_txn(&mut self) -> Result<()> {
         // Only execute extra_txn when stdlib version is 11
         if self

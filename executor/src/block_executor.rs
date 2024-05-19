@@ -106,6 +106,7 @@ pub fn block_execute<S: ChainStateReader + ChainStateWriter>(
         };
     }
 
+    #[cfg(feature = "force-deploy")]
     if let Some(extra_txn) = create_force_upgrade_extra_txn(chain_state)
         .map_err(BlockExecutorError::BlockChainStateErr)?
     {

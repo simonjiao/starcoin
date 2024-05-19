@@ -1260,15 +1260,18 @@ impl BlockChain {
             "invalid block: gas_used is not match"
         );
 
+        #[cfg(feature = "force-deploy")]
+        let valid_txn_num = if header.number() == get_force_upgrade_block_number(chain_id) {
+            vec_transaction_info.len() == transactions.len().checked_add(1).unwrap()
+        } else {
+            vec_transaction_info.len() == transactions.len()
+        };
+        #[cfg(not(feature = "force-deploy"))]
+        let valid_txn_num = vec_transaction_info.len() == transactions.len();
+
         verify_block!(
             VerifyBlockField::State,
-            {
-                if header.number() == get_force_upgrade_block_number(chain_id) {
-                    vec_transaction_info.len() == transactions.len().checked_add(1).unwrap()
-                } else {
-                    vec_transaction_info.len() == transactions.len()
-                }
-            },
+            valid_txn_num,
             "invalid txn num in the block"
         );
 

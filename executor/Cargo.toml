@@ -36,8 +36,9 @@ test-helper = { workspace = true }
 move-transactional-test-runner = { workspace = true }
 
 [features]
-default = []
+default = ["force-deploy"]
 fuzzing = ["starcoin-types/fuzzing"]
+force-deploy = []
 
 [package]
 authors = { workspace = true }

@@ -9,16 +9,21 @@ pub const FORCE_UPGRADE_BLOCK_NUMBER: u64 = 17500000;
 
 pub fn get_force_upgrade_block_number(chain_id: &ChainId) -> u64 {
     if chain_id.is_test() {
-        50
-    } else if chain_id.is_dev() {
-        60
+        #[cfg(feature = "force-upgrade-test")]
+        return 3;
+        #[cfg(not(feature = "force-upgrade-test"))]
+        return u64::MAX;
+    }
+
+    return if chain_id.is_dev() {
+        u64::MAX
     } else if chain_id.is_halley() || chain_id.is_proxima() {
         300
     } else if chain_id.is_barnard() {
         16085000
     } else {
         FORCE_UPGRADE_BLOCK_NUMBER
-    }
+    };
 }
 
 pub fn create_account(private_hex: &str) -> anyhow::Result<Account> {

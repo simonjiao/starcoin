@@ -24,10 +24,12 @@ rand = { workspace = true }
 rand_core = { default-features = false, workspace = true }
 starcoin-account-api = { workspace = true }
 starcoin-accumulator = { workspace = true }
+# disable feature froce-deploy, same as `starcoin-executor`
 starcoin-chain = { workspace = true }
 starcoin-config = { workspace = true }
 starcoin-consensus = { workspace = true }
-starcoin-executor = { workspace = true }
+# disable feature froce-deploy
+starcoin-executor = { workspace = true, features = [] }
 starcoin-genesis = { workspace = true }
 network-api = { workspace = true }
 starcoin-service-registry = { workspace = true }
@@ -39,7 +41,7 @@ starcoin-vm-runtime = { workspace = true }
 starcoin-vm-types = { workspace = true }
 starcoin-types = { workspace = true }
 starcoin-executor-benchmark = { workspace = true }
-starcoin-dag = {workspace = true}
+starcoin-dag = { workspace = true }
 [dev-dependencies]
 
 [lib]
