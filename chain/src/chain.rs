@@ -592,6 +592,7 @@ pub struct ChainStatusWithBlock {
 
 pub struct BlockChain {
     genesis_hash: HashValue,
+    dag_genesis_hash: Option<HashValue>,
     txn_accumulator: MerkleAccumulator,
     block_accumulator: MerkleAccumulator,
     status: ChainStatusWithBlock,
@@ -638,9 +639,11 @@ impl BlockChain {
         let genesis = storage
             .get_genesis()?
             .ok_or_else(|| format_err!("Can not find genesis hash in storage."))?;
+        let dag_genesis_hash = dag.load_dag_genesis()?;
         watch(CHAIN_WATCH_NAME, "n1253");
         let mut chain = Self {
             genesis_hash: genesis,
+            dag_genesis_hash,
             time_service,
             txn_accumulator: info_2_accumulator(
                 txn_accumulator_info.clone(),
@@ -664,7 +667,7 @@ impl BlockChain {
             dag: dag.clone(),
         };
         let current_header = chain.current_header();
-        if chain.check_dag_type(&current_header)? != DagHeaderType::Single {
+        if chain.check_dag_type(&current_header)? == DagHeaderType::Normal {
             dag.set_reindex_root(chain.get_block_dag_origin()?)?;
         }
         watch(CHAIN_WATCH_NAME, "n1251");
@@ -681,9 +684,10 @@ impl BlockChain {
         storage: Arc<dyn Store>,
         genesis_epoch: Epoch,
         genesis_block: Block,
-        dag: BlockDAG,
+        mut dag: BlockDAG,
     ) -> Result<Self> {
         debug_assert!(genesis_block.header().is_genesis());
+        let genesis_header = genesis_block.header().clone();
         let txn_accumulator = MerkleAccumulator::new_empty(
             storage.get_accumulator_store(AccumulatorStoreType::Transaction),
         );
@@ -703,6 +707,20 @@ impl BlockChain {
             &chain_id,
             None,
         )?;
+        {
+            let need_init = {
+                let statedb = ChainStateDB::new(storage.clone().into_super_arc(), None);
+                statedb
+                    .get_on_chain_config::<FlexiDagConfig>()?
+                    .map(|c| c.effective_height)
+                    .unwrap_or(u64::MAX)
+                    == 0
+            };
+            if need_init {
+                assert!(dag.load_dag_genesis()?.is_none());
+                dag.init_with_genesis(genesis_header)?;
+            }
+        }
         Self::new(time_service, executed_block.block.id(), storage, None, dag)
     }
 
@@ -812,13 +830,16 @@ impl BlockChain {
         let final_block_gas_limit = block_gas_limit
             .map(|block_gas_limit| min(block_gas_limit, on_chain_block_gas_limit))
             .unwrap_or(on_chain_block_gas_limit);
-        let (_, tips_hash) = if current_number <= self.dag_fork_height()?.unwrap_or(u64::MAX) {
-            (None, None)
+        let tips_hash = if current_number <= self.dag_fork_height()?.unwrap_or(u64::MAX) {
+            None
         } else if tips.is_some() {
-            (Some(self.get_block_dag_genesis(&previous_header)?), tips)
+            tips
         } else {
-            let result = self.current_tips_hash(&previous_header)?.expect("the block number is larger than the dag fork number but the state data doese not exis");
-            (Some(result.0), Some(result.1))
+            Some(
+                self.current_tips_hash()?
+                    .map(|r| r.1)
+                    .expect("Creating a Dag block but tips don't exist"),
+            )
         };
         let strategy = epoch.strategy();
         let difficulty = strategy.calculate_next_difficulty(self)?;
@@ -976,7 +997,7 @@ impl BlockChain {
 
         let results = header.parents_hash().ok_or_else(|| anyhow!("dag block has no parents."))?.into_iter().map(|parent_hash| {
             let header = self.storage.get_block_header_by_hash(parent_hash)?.ok_or_else(|| anyhow!("failed to find the block header in the block storage when checking the dag block exists, block hash: {:?}, number: {:?}", header.id(), header.number()))?;
-            let dag_genesis_hash = self.get_block_dag_genesis(&header)?;
+            let dag_genesis_hash = self.get_block_dag_genesis()?;
             let dag_genesis = self.storage.get_block_header_by_hash(dag_genesis_hash)?.ok_or_else(|| anyhow!("failed to find the block header in the block storage when checking the dag block exists, block hash: {:?}, number: {:?}", header.id(), header.number()))?;
             Ok(dag_genesis.parent_hash())
         }).collect::<Result<HashSet<_>>>()?;
@@ -1667,33 +1688,35 @@ impl BlockChain {
                 "Init dag genesis {dag_genesis_id} height {}",
                 genesis.number()
             );
-            self.dag.init_with_genesis(genesis)?;
+            if self.dag_genesis_hash.is_some() {
+                return Err(anyhow!(
+                    "dag genesis already exist, new {}, current {:?}",
+                    genesis.id(),
+                    self.dag_genesis_hash
+                ));
+            }
+            let loaded = self.dag.load_dag_genesis()?;
+            if loaded.is_none() {
+                self.dag.init_with_genesis(genesis)?;
+                self.dag_genesis_hash = Some(dag_genesis_id);
+            } else {
+                return Err(anyhow!(
+                    "dag genesis already exists in db but hasn't been loaded, new {}, loaded {:?}",
+                    genesis.id(),
+                    loaded
+                ));
+            }
         }
         Ok(())
     }
 
-    pub fn get_block_dag_genesis(&self, header: &BlockHeader) -> Result<HashValue> {
-        let dag_fork_height = self
-            .dag_fork_height()?
-            .ok_or_else(|| anyhow!("unset dag fork height"))?;
-        let block_info = self
-            .storage
-            .get_block_info(header.id())?
-            .ok_or_else(|| anyhow!("Cannot find block info by hash {:?}", header.id()))?;
-        let block_accumulator = MerkleAccumulator::new_with_info(
-            block_info.get_block_accumulator_info().clone(),
-            self.storage
-                .get_accumulator_store(AccumulatorStoreType::Block),
-        );
-        let dag_genesis = block_accumulator
-            .get_leaf(dag_fork_height)?
-            .ok_or_else(|| anyhow!("failed to get the dag genesis"))?;
-
-        Ok(dag_genesis)
+    pub fn get_block_dag_genesis(&self) -> Result<HashValue> {
+        self.dag_genesis_hash
+            .ok_or(anyhow!("Dag genesis not exist"))
     }
 
     pub fn get_block_dag_origin(&self) -> Result<HashValue> {
-        let dag_genesis = self.get_block_dag_genesis(&self.current_header())?;
+        let dag_genesis = self.get_block_dag_genesis()?;
         let block_header = self
             .storage
             .get_block_header_by_hash(dag_genesis)?
@@ -1704,8 +1727,8 @@ impl BlockChain {
         ))
     }
 
-    pub fn get_dag_state_by_block(&self, header: &BlockHeader) -> Result<(HashValue, DagState)> {
-        let dag_genesis = self.get_block_dag_genesis(header)?;
+    pub fn get_dag_state(&self) -> Result<(HashValue, DagState)> {
+        let dag_genesis = self.get_block_dag_genesis()?;
         Ok((dag_genesis, self.dag.get_dag_state(dag_genesis)?))
     }
 
@@ -2120,11 +2143,8 @@ impl ChainReader for BlockChain {
         }))
     }
 
-    fn current_tips_hash(
-        &self,
-        header: &BlockHeader,
-    ) -> Result<Option<(HashValue, Vec<HashValue>)>> {
-        let (dag_genesis, dag_state) = self.get_dag_state_by_block(header)?;
+    fn current_tips_hash(&self) -> Result<Option<(HashValue, Vec<HashValue>)>> {
+        let (dag_genesis, dag_state) = self.get_dag_state()?;
         Ok(Some((dag_genesis, dag_state.tips)))
     }
 
@@ -2283,7 +2303,7 @@ impl BlockChain {
         let dag = self.dag.clone();
         let (new_tip_block, _) = (executed_block.block(), executed_block.block_info());
         let (dag_genesis, mut tips) = self
-            .current_tips_hash(new_tip_block.header())?
+            .current_tips_hash()?
             .expect("tips should exists in dag");
         let parents = executed_block
             .block
