@@ -14,7 +14,6 @@ use crate::ghostdag::protocol::GhostdagManager;
 use crate::{process_key_already_error, reachability};
 use anyhow::{anyhow, bail, Ok};
 use bcs_ext::BCSCodec;
-use starcoin_config::genesis_config::G_TEST_DAG_FORK_STATE_KEY;
 use starcoin_config::{temp_dir, RocksdbConfig};
 use starcoin_crypto::{HashValue as Hash, HashValue};
 use starcoin_logger::prelude::info;
@@ -276,29 +275,13 @@ impl BlockDAG {
             .read()
             .iter()?
             .flatten()
-            .take(3)
+            .take(2)
             .map(|(hash, _)| hash)
             .collect::<Vec<_>>();
 
         match state.len() {
             0 => Ok(None),
-            1 => {
-                let hash = *state.first().unwrap();
-                if hash == *G_TEST_DAG_FORK_STATE_KEY {
-                    Ok(None)
-                } else {
-                    Ok(Some(hash))
-                }
-            }
-            2 if state.contains(&*G_TEST_DAG_FORK_STATE_KEY) => {
-                let first = *state.first().unwrap();
-                let second = *state.last().unwrap();
-                if first == *G_TEST_DAG_FORK_STATE_KEY {
-                    Ok(Some(second))
-                } else {
-                    Ok(Some(first))
-                }
-            }
+            1 => Ok(Some(*state.first().unwrap())),
             _ => Err(anyhow!("more thane one dag genesis found")),
         }
     }

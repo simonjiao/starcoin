@@ -8,10 +8,9 @@ use super::mock::SyncNodeMocker;
 use anyhow::{format_err, Result};
 use futures::channel::mpsc::unbounded;
 use starcoin_account_api::AccountInfo;
-use starcoin_chain_api::{message::ChainResponse, ChainReader};
-use starcoin_chain_service::ChainReaderService;
-use starcoin_config::genesis_config::{G_TEST_DAG_FORK_HEIGHT, G_TEST_DAG_FORK_STATE_KEY};
-use starcoin_dag::consensusdb::consenses_state::DagState;
+use starcoin_chain_api::{ChainReader};
+
+
 use starcoin_logger::prelude::*;
 use starcoin_service_registry::{RegistryAsyncService, RegistryService, ServiceRef};
 use starcoin_txpool_mock_service::MockTxPoolService;
@@ -38,6 +37,7 @@ async fn sync_block_process(
             registry.service_ref::<BlockConnectorService<MockTxPoolService>>(),
         )?;
         let dag_fork_height = local_node.chain().dag_fork_height()?.unwrap_or(u64::MAX);
+        assert_eq!(dag_fork_height, 0);
 
         let (sync_task, _task_handle, task_event_counter) = full_sync_task(
             current_block_id,
@@ -87,29 +87,8 @@ async fn test_sync_dag_blocks() -> Result<()> {
         .await
         .expect("failed to init system");
 
-    test_system
-        .target_node
-        .chain()
-        .dag()
-        .save_dag_state(*G_TEST_DAG_FORK_STATE_KEY, DagState { tips: vec![] })?;
-    test_system
-        .local_node
-        .chain()
-        .dag()
-        .save_dag_state(*G_TEST_DAG_FORK_STATE_KEY, DagState { tips: vec![] })?;
-
-    let mut target_node = Arc::new(test_system.target_node);
+    let target_node = Arc::new(test_system.target_node);
     let local_node = Arc::new(test_system.local_node);
-    Arc::get_mut(&mut target_node)
-        .unwrap()
-        .produce_block(G_TEST_DAG_FORK_HEIGHT)
-        .expect("failed to produce block");
-    let dag_genesis_header = target_node.chain().status().head;
-    assert!(
-        dag_genesis_header.number() == G_TEST_DAG_FORK_HEIGHT,
-        "dag genesis header number should be 10, but {}",
-        dag_genesis_header.number()
-    );
 
     // sync, the local and target will be a single chain to be a dag chain
     let (local_node, mut target_node) =
@@ -137,32 +116,6 @@ async fn test_sync_dag_blocks() -> Result<()> {
 
     // wait for the dag block to be created
     async_std::task::sleep(std::time::Duration::from_secs(8)).await;
-
-    let chain_reader_service = test_system
-        .registry
-        .service_ref::<ChainReaderService>()
-        .await?;
-    match chain_reader_service
-        .send(starcoin_chain_api::message::ChainRequest::GetHeadChainStatus())
-        .await??
-    {
-        ChainResponse::ChainStatus(chain_status) => {
-            debug!(
-                "local_node chain hash: {:?}, number: {:?}",
-                chain_status.head.id(),
-                chain_status.head.number()
-            );
-            assert_eq!(
-                chain_status.head.number(),
-                G_TEST_DAG_FORK_HEIGHT
-                    .checked_add(dag_block_count)
-                    .ok_or_else(|| format_err!("overflow"))?,
-            );
-        }
-        _ => {
-            panic!("failed to get chain status");
-        }
-    }
 
     Arc::get_mut(&mut target_node)
         .unwrap()

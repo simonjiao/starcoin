@@ -14,7 +14,6 @@ use starcoin_chain_api::{
     verify_block, ChainReader, ChainWriter, ConnectBlockError, EventWithProof, ExcludedTxns,
     ExecutedBlock, MintedUncleNumber, TransactionInfoWithProof, VerifiedBlock, VerifyBlockField,
 };
-use starcoin_config::genesis_config::{G_TEST_DAG_FORK_HEIGHT, G_TEST_DAG_FORK_STATE_KEY};
 use starcoin_consensus::Consensus;
 use starcoin_crypto::hash::PlainCryptoHash;
 use starcoin_crypto::HashValue;
@@ -2370,23 +2369,10 @@ impl BlockChain {
     }
 
     pub fn dag_fork_height(&self) -> Result<Option<BlockNumber>> {
-        let chain_id = self.status().head().chain_id();
-        if chain_id.is_test() {
-            let result = self.dag.get_dag_state(*G_TEST_DAG_FORK_STATE_KEY);
-            if result.is_ok() {
-                Ok(Some(G_TEST_DAG_FORK_HEIGHT))
-            } else {
-                Ok(self
-                    .statedb
-                    .get_on_chain_config::<FlexiDagConfig>()?
-                    .map(|c| c.effective_height))
-            }
-        } else {
-            Ok(self
-                .statedb
-                .get_on_chain_config::<FlexiDagConfig>()?
-                .map(|c| c.effective_height))
-        }
+        Ok(self
+            .statedb
+            .get_on_chain_config::<FlexiDagConfig>()?
+            .map(|c| c.effective_height))
     }
 }
 
