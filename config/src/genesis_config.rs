@@ -153,6 +153,10 @@ impl BuiltinNetworkID {
         matches!(self, BuiltinNetworkID::Test)
     }
 
+    pub fn is_dag_test(self) -> bool {
+        matches!(self, BuiltinNetworkID::DagTest)
+    }
+
     pub fn is_dev(self) -> bool {
         matches!(self, BuiltinNetworkID::Dev)
     }
