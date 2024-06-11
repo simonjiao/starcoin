@@ -1688,23 +1688,28 @@ impl BlockChain {
                 "Init dag genesis {dag_genesis_id} height {}",
                 genesis.number()
             );
-            if self.dag_genesis_hash.is_some() {
-                return Err(anyhow!(
-                    "dag genesis already exist, new {}, current {:?}",
-                    genesis.id(),
-                    self.dag_genesis_hash
-                ));
+            if let Some(cached) = &self.dag_genesis_hash {
+                return if cached != &dag_genesis_id {
+                    Err(anyhow!(
+                        "dag genesis already exist, new {}, current {:?}",
+                        genesis.id(),
+                        self.dag_genesis_hash
+                    ))
+                } else {
+                    Ok(())
+                };
             }
-            let loaded = self.dag.load_dag_genesis()?;
-            if loaded.is_none() {
-                self.dag.init_with_genesis(genesis)?;
-                self.dag_genesis_hash = Some(dag_genesis_id);
-            } else {
-                return Err(anyhow!(
-                    "dag genesis already exists in db but hasn't been loaded, new {}, loaded {:?}",
+            if let Some(loaded) = self.dag.load_dag_genesis()? {
+                if loaded != dag_genesis_id {
+                    return Err(anyhow!(
+                    "dag genesis already exists in db but hasn't been loaded, new {}, loaded {}",
                     genesis.id(),
                     loaded
-                ));
+                    ));
+                }
+            } else {
+                self.dag.init_with_genesis(genesis)?;
+                self.dag_genesis_hash = Some(dag_genesis_id);
             }
         }
         Ok(())
