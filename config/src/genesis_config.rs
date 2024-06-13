@@ -718,7 +718,7 @@ static G_EMPTY_BOOT_NODES: Lazy<Vec<MultiaddrWithPeerId>> = Lazy::new(Vec::new);
 const ONE_DAY: u64 = 86400;
 
 // for test
-pub static G_TEST_DAG_FORK_HEIGHT: BlockNumber = 20;
+pub static G_TEST_DAG_FORK_HEIGHT: BlockNumber = 0;
 pub static G_TEST_DAG_FORK_STATE_KEY: Lazy<HashValue> = Lazy::new(|| 0.into());
 
 pub static G_TEST_CONFIG: Lazy<GenesisConfig> = Lazy::new(|| {
@@ -768,7 +768,7 @@ pub static G_TEST_CONFIG: Lazy<GenesisConfig> = Lazy::new(|| {
             min_action_delay: 60 * 60 * 1000, // 1h
         },
         transaction_timeout: ONE_DAY,
-        dag_effective_height: u64::MAX,
+        dag_effective_height: 0,
     }
 });
 
