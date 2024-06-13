@@ -189,7 +189,7 @@ fn test_find_ancestor_fork() -> Result<()> {
 }
 
 fn gen_uncle() -> (MockChain, BlockChain, BlockHeader) {
-    let mut mock_chain = MockChain::new(ChainNetwork::new_test()).unwrap();
+    let mut mock_chain = MockChain::new(ChainNetwork::new_single_test()).unwrap();
     let mut times = 10;
     mock_chain.produce_and_apply_times(times).unwrap();
 
@@ -522,9 +522,10 @@ fn test_get_blocks_by_number() -> Result<()> {
     Ok(())
 }
 
+// todo: remove or fix me. where is the dag chain?
 #[stest::test]
 fn test_block_chain_for_dag_fork() -> Result<()> {
-    let mut mock_chain = MockChain::new(ChainNetwork::new_test())?;
+    let mut mock_chain = MockChain::new(ChainNetwork::new_single_test())?;
 
     // generate the fork chain
     mock_chain.produce_and_apply_times(3).unwrap();
@@ -546,7 +547,8 @@ fn test_block_chain_for_dag_fork() -> Result<()> {
 #[stest::test]
 fn test_gen_dag_chain() -> Result<()> {
     let fork_number = 11u64;
-    let mut chain = gen_blockchain_for_dag_test(&ChainNetwork::new_test(), fork_number).unwrap();
+    let mut chain =
+        gen_blockchain_for_dag_test(&ChainNetwork::new_single_test(), fork_number).unwrap();
 
     let effective_height = chain
         .chain_state()

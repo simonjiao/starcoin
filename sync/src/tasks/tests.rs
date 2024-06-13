@@ -23,7 +23,7 @@ use starcoin_accumulator::{Accumulator, MerkleAccumulator};
 use starcoin_chain::BlockChain;
 use starcoin_chain_api::ChainReader;
 use starcoin_chain_mock::MockChain;
-use starcoin_config::{BuiltinNetworkID, ChainNetwork};
+use starcoin_config::{BuiltinNetworkID, ChainNetwork, NodeConfig};
 use starcoin_crypto::HashValue;
 use starcoin_dag::blockdag::BlockDAG;
 use starcoin_genesis::Genesis;
@@ -291,12 +291,13 @@ pub async fn test_full_sync_fork_from_genesis() -> Result<()> {
 
 #[stest::test(timeout = 120)]
 pub async fn test_full_sync_continue() -> Result<()> {
-    let test_system = SyncTestSystem::initialize_sync_system().await?;
+    let test_system =
+        SyncTestSystem::initialize_sync_system(NodeConfig::random_for_single_test()).await?;
     let mut node1 = test_system.target_node;
     let dag = node1.chain().dag();
     node1.produce_block(10)?;
     let arc_node1 = Arc::new(node1);
-    let net2 = ChainNetwork::new_builtin(BuiltinNetworkID::Test);
+    let net2 = ChainNetwork::new_single_test();
     //fork from genesis
     let mut node2 = test_system.local_node;
     node2.produce_block(7)?;
@@ -1085,8 +1086,8 @@ fn sync_block_in_async_connection(
 
 #[stest::test]
 async fn test_sync_block_in_async_connection() -> Result<()> {
-    let _net = ChainNetwork::new_builtin(BuiltinNetworkID::Test);
-    let test_system = SyncTestSystem::initialize_sync_system().await?;
+    let test_system =
+        SyncTestSystem::initialize_sync_system(NodeConfig::random_for_single_test()).await?;
     let mut target_node = Arc::new(test_system.target_node);
 
     let local_node = Arc::new(test_system.local_node);

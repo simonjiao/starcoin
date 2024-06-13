@@ -62,7 +62,7 @@ fn test_create_block_template_by_net(net: ChainNetworkID) {
 
 #[stest::test(timeout = 120)]
 fn test_switch_main() {
-    let node_config = Arc::new(NodeConfig::random_for_test());
+    let node_config = Arc::new(NodeConfig::random_for_single_test());
     let (storage, _, genesis, dag) = StarcoinGenesis::init_storage_for_test(node_config.net())
         .expect("init storage by genesis fail.");
     let genesis_id = genesis.block().id();
@@ -194,7 +194,7 @@ fn test_switch_main() {
 
 #[stest::test]
 fn test_do_uncles() {
-    let node_config = Arc::new(NodeConfig::random_for_test());
+    let node_config = Arc::new(NodeConfig::random_for_single_test());
     let (storage, _, genesis, dag) = StarcoinGenesis::init_storage_for_test(node_config.net())
         .expect("init storage by genesis fail.");
     let genesis_id = genesis.block().id();
@@ -366,7 +366,7 @@ fn test_new_head() {
 
 #[stest::test(timeout = 120)]
 fn test_new_branch() {
-    let node_config = Arc::new(NodeConfig::random_for_test());
+    let node_config = Arc::new(NodeConfig::random_for_single_test());
     let (storage, _, genesis, dag) = StarcoinGenesis::init_storage_for_test(node_config.net())
         .expect("init storage by genesis fail.");
     let genesis_id = genesis.block().id();

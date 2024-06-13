@@ -38,8 +38,8 @@ pub struct SyncTestSystem {
 
 #[cfg(test)]
 impl SyncTestSystem {
-    pub async fn initialize_sync_system() -> Result<SyncTestSystem> {
-        let config = Arc::new(NodeConfig::random_for_test());
+    pub async fn initialize_sync_system(config: NodeConfig) -> Result<SyncTestSystem> {
+        let config = Arc::new(config);
 
         let temp_path = PathBuf::from(starcoin_config::temp_dir().as_ref());
         let storage_path = temp_path.join(Path::new("local/storage"));

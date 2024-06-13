@@ -472,6 +472,22 @@ impl NodeConfig {
         Self::load_with_opt(&opt).expect("Auto generate test config should success.")
     }
 
+    pub fn random_for_single_test() -> Self {
+        let opt = StarcoinOpt {
+            net: Some(BuiltinNetworkID::Test.into()),
+            ..StarcoinOpt::default()
+        };
+        let mut base = BaseConfig::load_with_opt(&opt).expect("Load base config should success.");
+        base.net = {
+            let net = base.net.clone();
+            let mut genesis_config = net.genesis_config().clone();
+            genesis_config.dag_effective_height = u64::MAX;
+            ChainNetwork::new(net.id().clone(), genesis_config)
+        };
+        base.into_node_config(&opt)
+            .expect("Auto generate test config should success.")
+    }
+
     pub fn random_for_test_disable_miner(disable_mint: bool) -> Self {
         let mut miner_config = MinerConfig::default();
         miner_config.disable_miner_client = Some(disable_mint);

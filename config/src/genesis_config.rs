@@ -460,6 +460,13 @@ impl ChainNetwork {
         Self::new_builtin(BuiltinNetworkID::Test)
     }
 
+    pub fn new_single_test() -> Self {
+        let test = ChainNetwork::new_test();
+        let mut genesis_config = test.genesis_config().clone();
+        genesis_config.dag_effective_height = u64::MAX;
+        Self::new(test.id().clone(), genesis_config)
+    }
+
     pub fn id(&self) -> &ChainNetworkID {
         &self.id
     }

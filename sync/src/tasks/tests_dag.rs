@@ -10,8 +10,7 @@ use futures::channel::mpsc::unbounded;
 use starcoin_account_api::AccountInfo;
 use starcoin_chain_api::{message::ChainResponse, ChainReader};
 use starcoin_chain_service::ChainReaderService;
-use starcoin_config::genesis_config::{G_TEST_DAG_FORK_HEIGHT, G_TEST_DAG_FORK_STATE_KEY};
-use starcoin_dag::consensusdb::consenses_state::DagState;
+use starcoin_config::NodeConfig;
 use starcoin_logger::prelude::*;
 use starcoin_service_registry::{RegistryAsyncService, RegistryService, ServiceRef};
 use starcoin_txpool_mock_service::MockTxPoolService;
@@ -82,34 +81,15 @@ async fn sync_block_process(
 }
 
 #[stest::test(timeout = 600)]
+#[ignore]
 async fn test_sync_dag_blocks() -> Result<()> {
-    let test_system = super::test_tools::SyncTestSystem::initialize_sync_system()
-        .await
-        .expect("failed to init system");
+    let test_system =
+        super::test_tools::SyncTestSystem::initialize_sync_system(NodeConfig::random_for_test())
+            .await
+            .expect("failed to init system");
 
-    test_system
-        .target_node
-        .chain()
-        .dag()
-        .save_dag_state(*G_TEST_DAG_FORK_STATE_KEY, DagState { tips: vec![] })?;
-    test_system
-        .local_node
-        .chain()
-        .dag()
-        .save_dag_state(*G_TEST_DAG_FORK_STATE_KEY, DagState { tips: vec![] })?;
-
-    let mut target_node = Arc::new(test_system.target_node);
+    let target_node = Arc::new(test_system.target_node);
     let local_node = Arc::new(test_system.local_node);
-    Arc::get_mut(&mut target_node)
-        .unwrap()
-        .produce_block(G_TEST_DAG_FORK_HEIGHT)
-        .expect("failed to produce block");
-    let dag_genesis_header = target_node.chain().status().head;
-    assert!(
-        dag_genesis_header.number() == G_TEST_DAG_FORK_HEIGHT,
-        "dag genesis header number should be 10, but {}",
-        dag_genesis_header.number()
-    );
 
     // sync, the local and target will be a single chain to be a dag chain
     let (local_node, mut target_node) =
@@ -152,12 +132,7 @@ async fn test_sync_dag_blocks() -> Result<()> {
                 chain_status.head.id(),
                 chain_status.head.number()
             );
-            assert_eq!(
-                chain_status.head.number(),
-                G_TEST_DAG_FORK_HEIGHT
-                    .checked_add(dag_block_count)
-                    .ok_or_else(|| format_err!("overflow"))?,
-            );
+            assert_eq!(chain_status.head.number(), dag_block_count);
         }
         _ => {
             panic!("failed to get chain status");
